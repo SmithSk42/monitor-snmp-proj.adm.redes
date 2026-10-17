@@ -36,7 +36,7 @@ function registrarEvento(tipo, mensagem) {
 
 // 2. CONFIGURAÇÃO PADRÃO EM MEMÓRIA (Requisito 5)
 let config = {
-    routerIp: '192.168.56.101', // IP do MikroTik CHR
+    routerIp: '192.168.88.1', // IP do MikroTik CHR
     community: 'public',
     ifIndex: 1,                 // Índice da interface (1 = ether1 no MikroTik)
     intervalSec: 3,             // Intervalo de coleta em segundos
