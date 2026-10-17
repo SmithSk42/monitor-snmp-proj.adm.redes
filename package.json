@@ -1,0 +1,19 @@
+{
+  "name": "monitor-snmp-par",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.3.0",
+    "net-snmp": "^3.29.2",
+    "nodemailer": "^10.1.2",
+    "sqlite3": "^6.0.1"
+  }
+}

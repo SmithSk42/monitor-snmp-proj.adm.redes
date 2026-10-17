@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Monitor SNMP - MikroTik RouterOS (PAR)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-6">
+
+    <!-- Cabeçalho -->
+    <header class="max-w-7xl mx-auto mb-6 flex flex-wrap justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
+        <div>
+            <h1 class="text-2xl font-bold text-cyan-400">Sistema de Monitoramento de Roteador via SNMP</h1>
+            <p class="text-sm text-slate-400">Projeto e Administração de Redes — IFBA | MikroTik RouterOS CHR</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span id="badgeStatus" class="px-3 py-1 rounded-full text-xs font-bold bg-red-600 text-white">PARADO</span>
+            <button onclick="controlar('iniciar')" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-semibold text-sm transition">▶ Iniciar</button>
+            <button onclick="controlar('pausar')" class="bg-amber-600 hover:bg-amber-500 px-4 py-2 rounded-lg font-semibold text-sm transition">⏸ Pausar</button>
+            <button onclick="controlar('resetar')" class="bg-rose-600 hover:bg-rose-500 px-4 py-2 rounded-lg font-semibold text-sm transition">↺ Resetar</button>
+        </div>
+    </header>
+
+    <!-- Área de Alertas Pop-up Imediatos (Requisito 4) -->
+    <div id="containerPopups" class="fixed top-5 right-5 z-50 flex flex-col gap-3 max-w-md"></div>
+
+    <!-- Navegação de Abas -->
+    <div class="max-w-7xl mx-auto mb-6 flex gap-3 border-b border-slate-700 pb-3">
+        <button onclick="mostrarAba('tempoReal')" class="bg-cyan-600 hover:bg-cyan-500 px-4 py-2 rounded-lg text-sm font-bold">1. Gráficos em Tempo Real</button>
+        <button onclick="mostrarAba('historico')" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg text-sm font-bold">2. Gráficos Históricos</button>
+        <button onclick="mostrarAba('configuracao')" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg text-sm font-bold">3. Configurações & Thresholds</button>
+    </div>
+
+    <main class="max-w-7xl mx-auto">
+        <!-- ABA 1: TEMPO REAL -->
+        <section id="aba-tempoReal" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <h2 class="text-lg font-semibold mb-2 text-cyan-300">Tráfego da Interface em Tempo Real (bps)</h2>
+                <canvas id="chartTrafegoReal" height="180"></canvas>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <h2 class="text-lg font-semibold mb-2 text-amber-300">Utilização da CPU em Tempo Real (%)</h2>
+                <canvas id="chartCpuReal" height="180"></canvas>
+            </div>
+            <div class="lg:col-span-2 bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <h3 class="text-sm font-bold text-slate-300 mb-2">Registro de Eventos, Erros SNMP e Alertas Recentes</h3>
+                <div id="listaLogs" class="text-xs font-mono bg-slate-950 p-3 rounded-lg h-36 overflow-y-auto space-y-1 text-slate-300"></div>
+            </div>
+        </section>
+
+        <!-- ABA 2: HISTÓRICO COM FILTRO DE PERÍODO -->
+        <section id="aba-historico" class="hidden space-y-6">
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-wrap gap-4 items-end">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Data/Hora Início</label>
+                    <input type="datetime-local" id="filtroInicio" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Data/Hora Fim</label>
+                    <input type="datetime-local" id="filtroFim" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white">
+                </div>
+                <button onclick="consultarHistorico()" class="bg-cyan-600 hover:bg-cyan-500 px-5 py-2 rounded-lg font-bold text-sm">Filtrar Período</button>
+                <span id="infoPeriodoHistorico" class="text-sm text-amber-300 font-semibold ml-auto"></span>
+            </div>
+
+            <div id="avisoSemDados" class="hidden bg-amber-900/50 border border-amber-500 text-amber-200 p-4 rounded-xl text-center font-semibold">
+                Nenhuma amostra encontrada para o período selecionado.
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                    <h2 class="text-lg font-semibold mb-2 text-cyan-300">Histórico de Tráfego IN / OUT (bps)</h2>
+                    <canvas id="chartTrafegoHist" height="180"></canvas>
+                </div>
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                    <h2 class="text-lg font-semibold mb-2 text-amber-300">Histórico de Utilização da CPU (%)</h2>
+                    <canvas id="chartCpuHist" height="180"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- ABA 3: ÁREA DE CONFIGURAÇÃO -->
+        <section id="aba-configuracao" class="hidden bg-slate-800 p-6 rounded-xl border border-slate-700 max-w-3xl mx-auto">
+            <h2 class="text-xl font-bold mb-4 text-cyan-400">Parâmetros de Coleta SNMP e Thresholds de Alerta</h2>
+            <div id="msgConfig" class="hidden mb-4 p-3 rounded-lg text-sm font-bold"></div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                    <label class="block text-slate-300 mb-1">IP do Roteador (MikroTik CHR)</label>
+                    <input type="text" id="cfgIp" class="w-full bg-slate-900 border border-slate-600 rounded p-2">
+                </div>
+                <div>
+                    <label class="block text-slate-300 mb-1">Comunidade SNMP (v2c)</label>
+                    <input type="text" id="cfgCommunity" class="w-full bg-slate-900 border border-slate-600 rounded p-2">
+                </div>
+                <div>
+                    <label class="block text-slate-300 mb-1">Índice da Interface SNMP (ex: 1 = ether1)</label>
+                    <input type="number" id="cfgIfIndex" class="w-full bg-slate-900 border border-slate-600 rounded p-2">
+                </div>
+                <div>
+                    <label class="block text-slate-300 mb-1">Intervalo de Coleta (segundos > 0)</label>
+                    <input type="number" id="cfgInterval" class="w-full bg-slate-900 border border-slate-600 rounded p-2">
+                </div>
+                <div>
+                    <label class="block text-slate-300 mb-1">Threshold Tráfego IN (bps)</label>
+                    <input type="number" id="cfgThIn" class="w-full bg-slate-900 border border-slate-600 rounded p-2">
+                </div>
+                <div>
+                    <label class="block text-slate-300 mb-1">Threshold Tráfego OUT (bps)</label>
+                    <input type="number" id="cfgThOut" class="w-full bg-slate-900 border border-slate-600 rounded p-2">
+                </div>
+                <div>
+                    <label class="block text-slate-300 mb-1">Threshold Utilização de CPU (%)</label>
+                    <input type="number" id="cfgThCpu" class="w-full bg-slate-900 border border-slate-600 rounded p-2">
+                </div>
+                <div>
+                    <label class="block text-slate-300 mb-1">E-mail de Destino dos Alertas</label>
+                    <input type="email" id="cfgEmail" placeholder="usuario@dominio.com" class="w-full bg-slate-900 border border-slate-600 rounded p-2">
+                </div>
+                <div class="md:col-span-2 flex flex-wrap gap-6 pt-2">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="cfgPopup" class="w-4 h-4">
+                        <span>Ativar Alerta por Pop-up Imediato</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="cfgAlertEmail" class="w-4 h-4">
+                        <span>Ativar Alerta por E-mail</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer text-amber-300">
+                        <input type="checkbox" id="cfgSimulacao" class="w-4 h-4">
+                        <span>Modo Simulador (Testar sem VM MikroTik ativa)</span>
+                    </label>
+                </div>
+                <div class="md:col-span-2 border-t border-slate-700 pt-3 mt-2">
+                    <p class="text-xs text-slate-400 mb-2">Opcional: Credenciais SMTP para disparo real de e-mail (ex: Senha de App do Gmail)</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input type="text" id="cfgSmtpUser" placeholder="E-mail remetente SMTP" class="bg-slate-900 border border-slate-600 rounded p-2">
+                        <input type="password" id="cfgSmtpPass" placeholder="Senha / App Password SMTP" class="bg-slate-900 border border-slate-600 rounded p-2">
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="salvarConfiguracoes()" class="mt-6 bg-emerald-600 hover:bg-emerald-500 px-6 py-2.5 rounded-lg font-bold text-sm">Salvar Configurações</button>
+        </section>
+    </main>
+
+    <script>
+        // Inicialização dos Gráficos Chart.js (Requisitos 3.1, 3.2 e 6)
+        const criarGraficoTrafego = (ctx) => new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'Tráfego IN (bps)', data: [], borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)', tension: 0.2 },
+                    { label: 'Tráfego OUT (bps)', data: [], borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,0.1)', tension: 0.2 }
+                ]
+            },
+            options: { scales: { y: { beginAtZero: true, title: { display: true, text: 'Bits por segundo (bps)' } } } }
+        });
+
+        const criarGraficoCpu = (ctx) => new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'Utilização de CPU (%)', data: [], borderColor: '#fbbf24', backgroundColor: 'rgba(251,191,36,0.15)', fill: true, tension: 0.2 }
+                ]
+            },
+            options: { scales: { y: { min: 0, max: 100, title: { display: true, text: 'Percentual (%)' } } } }
+        });
+
+        const chartTrafegoReal = criarGraficoTrafego(document.getElementById('chartTrafegoReal'));
+        const chartCpuReal = criarGraficoCpu(document.getElementById('chartCpuReal'));
+        const chartTrafegoHist = criarGraficoTrafego(document.getElementById('chartTrafegoHist'));
+        const chartCpuHist = criarGraficoCpu(document.getElementById('chartCpuHist'));
+
+        let configCarregada = false;
+
+        function mostrarAba(aba) {
+            ['tempoReal', 'historico', 'configuracao'].forEach(id => {
+                document.getElementById('aba-' + id).classList.add('hidden');
+            });
+            document.getElementById('aba-' + aba).classList.remove('hidden');
+        }
+
+        function exibirPopupAlerta(alerta) {
+            const div = document.createElement('div');
+            div.className = 'bg-rose-950 border-2 border-rose-500 text-white p-4 rounded-xl shadow-2xl';
+            div.innerHTML = `
+                <div class="flex justify-between items-start">
+                    <strong class="text-rose-300 text-sm">⚠️ ALERTA: ${alerta.metrica}</strong>
+                    <button onclick="this.parentElement.parentElement.remove()" class="text-xs text-slate-300 hover:text-white">✖</button>
+                </div>
+                <p class="text-xs mt-1">Valor observado: <b>${alerta.valor}</b></p>
+                <p class="text-xs">Limite configurado: <b>${alerta.limite}</b></p>
+                <p class="text-xs text-slate-400 mt-1">Horário: ${alerta.horario}</p>
+            `;
+            document.getElementById('containerPopups').appendChild(div);
+            setTimeout(() => { if (div.parentElement) div.remove(); }, 10000);
+        }
+
+        async function atualizarEstado() {
+            try {
+                const res = await fetch('/api/status');
+                const dados = await res.json();
+
+                // Atualiza badge
+                const badge = document.getElementById('badgeStatus');
+                if (dados.coletando) {
+                    badge.textContent = 'COLETANDO AO VIVO';
+                    badge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-emerald-600 text-white';
+                } else {
+                    badge.textContent = 'PAUSADO / PARADO';
+                    badge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-amber-600 text-white';
+                }
+
+                // Preenche formulário na primeira carga
+                if (!configCarregada) {
+                    configCarregada = true;
+                    const c = dados.config;
+                    document.getElementById('cfgIp').value = c.routerIp;
+                    document.getElementById('cfgCommunity').value = c.community;
+                    document.getElementById('cfgIfIndex').value = c.ifIndex;
+                    document.getElementById('cfgInterval').value = c.intervalSec;
+                    document.getElementById('cfgThIn').value = c.thresholdInBps;
+                    document.getElementById('cfgThOut').value = c.thresholdOutBps;
+                    document.getElementById('cfgThCpu').value = c.thresholdCpu;
+                    document.getElementById('cfgEmail').value = c.emailDestino;
+                    document.getElementById('cfgPopup').checked = c.alertPopup;
+                    document.getElementById('cfgAlertEmail').checked = c.alertEmail;
+                    document.getElementById('cfgSimulacao').checked = c.modoSimulacao;
+                }
+
+                // Atualiza gráficos em tempo real
+                const labels = dados.sessaoAtual.map(a => a.horario);
+                chartTrafegoReal.data.labels = labels;
+                chartTrafegoReal.data.datasets[0].data = dados.sessaoAtual.map(a => a.bps_in);
+                chartTrafegoReal.data.datasets[1].data = dados.sessaoAtual.map(a => a.bps_out);
+                chartTrafegoReal.update();
+
+                chartCpuReal.data.labels = labels;
+                chartCpuReal.data.datasets[0].data = dados.sessaoAtual.map(a => a.cpu_load);
+                chartCpuReal.update();
+
+                // Dispara pop-ups de alertas recebidos
+                dados.alertas.forEach(exibirPopupAlerta);
+
+                // Atualiza logs
+                const resLogs = await fetch('/api/logs');
+                const dadosLogs = await resLogs.json();
+                document.getElementById('listaLogs').innerHTML = dadosLogs.logs.map(
+                    l => `<div><span class="text-slate-500">[${new Date(l.timestamp).toLocaleTimeString('pt-BR')}]</span> <b class="text-cyan-400">[${l.tipo}]</b> ${l.mensagem}</div>`
+                ).join('');
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function controlar(acao) {
+            await fetch('/api/controle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ acao })
+            });
+            atualizarEstado();
+        }
+
+        async function salvarConfiguracoes() {
+            const payload = {
+                routerIp: document.getElementById('cfgIp').value,
+                community: document.getElementById('cfgCommunity').value,
+                ifIndex: document.getElementById('cfgIfIndex').value,
+                intervalSec: document.getElementById('cfgInterval').value,
+                thresholdInBps: document.getElementById('cfgThIn').value,
+                thresholdOutBps: document.getElementById('cfgThOut').value,
+                thresholdCpu: document.getElementById('cfgThCpu').value,
+                emailDestino: document.getElementById('cfgEmail').value,
+                alertPopup: document.getElementById('cfgPopup').checked,
+                alertEmail: document.getElementById('cfgAlertEmail').checked,
+                modoSimulacao: document.getElementById('cfgSimulacao').checked,
+                smtpUser: document.getElementById('cfgSmtpUser').value,
+                smtpPass: document.getElementById('cfgSmtpPass').value
+            };
+
+            const res = await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const retorno = await res.json();
+            const msg = document.getElementById('msgConfig');
+            msg.classList.remove('hidden');
+
+            if (!res.ok) {
+                msg.className = 'mb-4 p-3 rounded-lg text-sm font-bold bg-rose-900 text-rose-200';
+                msg.textContent = 'Erro: ' + retorno.erro;
+            } else {
+                msg.className = 'mb-4 p-3 rounded-lg text-sm font-bold bg-emerald-900 text-emerald-200';
+                msg.textContent = 'Configurações salvas e aplicadas com sucesso!';
+            }
+        }
+
+        async function consultarHistorico() {
+            const inicio = document.getElementById('filtroInicio').value;
+            const fim = document.getElementById('filtroFim').value;
+            if (!inicio || !fim) {
+                alert('Selecione a data/hora de início e fim.');
+                return;
+            }
+
+            const res = await fetch(`/api/historico?inicio=${encodeURIComponent(inicio)}&fim=${encodeURIComponent(fim)}`);
+            const dados = await res.json();
+            const amostras = dados.amostras || [];
+
+            document.getElementById('infoPeriodoHistorico').textContent =
+                `Período: ${new Date(inicio).toLocaleString('pt-BR')} até ${new Date(fim).toLocaleString('pt-BR')} (${amostras.length} amostras)`;
+
+            const aviso = document.getElementById('avisoSemDados');
+            if (amostras.length === 0) {
+                aviso.classList.remove('hidden');
+            } else {
+                aviso.classList.add('hidden');
+            }
+
+            const labels = amostras.map(a => new Date(a.epoch).toLocaleString('pt-BR'));
+            chartTrafegoHist.data.labels = labels;
+            chartTrafegoHist.data.datasets[0].data = amostras.map(a => a.bps_in);
+            chartTrafegoHist.data.datasets[1].data = amostras.map(a => a.bps_out);
+            chartTrafegoHist.update();
+
+            chartCpuHist.data.labels = labels;
+            chartCpuHist.data.datasets[0].data = amostras.map(a => a.cpu_load);
+            chartCpuHist.update();
+        }
+
+        // Define período padrão do filtro histórico (últimas 2 horas)
+        const agora = new Date();
+        const duasHorasAtras = new Date(agora.getTime() - 2 * 60 * 60 * 1000);
+        document.getElementById('filtroInicio').value = duasHorasAtras.toISOString().slice(0, 16);
+        document.getElementById('filtroFim').value = agora.toISOString().slice(0, 16);
+
+        setInterval(atualizarEstado, 2000);
+        atualizarEstado();
+    </script>
+</body>
+</html>
