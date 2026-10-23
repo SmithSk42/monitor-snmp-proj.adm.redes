@@ -334,7 +334,7 @@
             chartCpuHist.update();
         }
 
-        // Define período padrão do filtro histórico (últimas 2 horas)
+        // Defiopane período padrão do filtro histórico (últimas 2 horas)
         const agora = new Date();
         const duasHorasAtras = new Date(agora.getTime() - 2 * 60 * 60 * 1000);
         document.getElementById('filtroInicio').value = duasHorasAtras.toISOString().slice(0, 16);
